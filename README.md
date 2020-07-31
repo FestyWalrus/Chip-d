@@ -1,7 +1,7 @@
-# Chip'd
+# Chip'd 0.9
 #### By Riley Knybel!
 Following tutorial at http://www.multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/ to make a Chip8 emulator in python with pygame.
-First Alpha! All intended features are implemented, some bugs
+First Beta! All intended features are implemented, some bugs
 
 ### Requirements:
 - Numpy
