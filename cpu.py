@@ -14,6 +14,7 @@ import numpy as np
 import random
 import pygame
 import sys
+import pickle #for save/load state
 
 class chip8:
 	def __init__(self):
@@ -23,9 +24,14 @@ class chip8:
 					pygame.K_s, pygame.K_d, pygame.K_z, pygame.K_c,
 					pygame.K_4, pygame.K_r, pygame.K_f, pygame.K_v]
 
-		self.tone = pygame.mixer.Sound("tone.wav")
+		self.tone = pygame.mixer.Sound("assets/tone.wav")
 
 		self.screen_update = False
+
+		self.paused = False
+
+		self.blocked = False #for 0xFX0A to wait for keypress
+		self.keyRegister = -1
 
 		self.opcode = bytearray(2)
 		self.opcode[0] = 0x00	#initialized to 0
@@ -59,7 +65,7 @@ class chip8:
 		#start with a black display
 		self.display = np.zeros((32, 64), dtype='bool')
 
-		with open("font", "rb") as font:
+		with open("assets/font", "rb") as font:
 			byte = font.read(1)
 			memIndex = 0x0
 
@@ -160,14 +166,16 @@ class chip8:
 				for i in range(0, height):
 					#print(str(hex(self.index + byteOffset)) + " " + hex(self.memory[self.index + byteOffset]))
 					bitRow = self.bits(self.memory[self.index + byteOffset])
-					if yPos + i > 31: #wrap around
-						yPos -= 32 #* yPos // 31
+					
 					
 					for count, bit in enumerate(bitRow):
-						if xPos + count > 63: #wrap around
-							xPos -= 64
 
 						if bit:
+							if yPos + i > 31: #wrap around
+								i -= 32 * ((yPos + i) // 32)
+							if xPos + count > 63: #wrap around
+								count -= 64 * ((xPos + count) // 64)
+								
 							if self.display[yPos + i][xPos + count] == True:
 								self.registers[0xF] = 1
 								
@@ -279,18 +287,8 @@ class chip8:
 				break
 
 			if cmd == 0xF00A:	#FX0A: Wait for keypress and store key in VX
-				while True:
-					event = pygame.event.wait()
-					if event.type == pygame.QUIT:
-						pygame.quit()
-						sys.exit(0)
-					if event.type == pygame.KEYDOWN:
-						print("Key was booped")
-						if event.key in self.kbKeys:
-							self.registers[(self.opcode & 0x0F00) // 0x100] = self.kbKeys.index(event.key)
-							break
-
-				self.pc += 2
+				self.blocked = True
+				self.keyRegister = (self.opcode & 0x0F00) // 0x100
 				break
 
 			if cmd == 0xF015:	#FX15: Sets delay timer to VX
@@ -385,5 +383,65 @@ class chip8:
 	def press_key(self, index):
 		self.keys[index] = True
 
+		if self.blocked:
+			self.registers[self.keyRegister] = index
+			self.keyRegister = -1
+			self.blocked = False
+			self.pc += 2
+
 	def release_key(self, index):
 		self.keys[index] = False
+
+	def reset(self, rom = "null"):
+		#reset opcode
+		self.opcode = [0x00, 0x00]
+
+		#wipe ram above 512 bytes
+		for i in range(0x200, len(self.memory)):
+			self.memory[i] = 0
+
+		#clear registers
+		for i in range(0, len(self.registers)):
+			self.registers[i] = 0
+
+		#reset these vars
+		self.delay_timer = 0
+		self.sound_timer = 0
+		self.index = 0
+		self.pc = 0x200 #program counter
+		self.sp = 0 #stack pointer
+
+		#clear the stack
+		for i in range(0, 16):
+			self.stack[i] = 0
+
+		#clear the display
+		self.display = np.zeros((32, 64), dtype='bool')
+		self.screen_update = True
+
+		self.blocked = False
+		self.paused = False
+
+		if rom != "null":
+			#load the rom into memory
+			with open(rom, "rb") as rom_file:
+				byte = rom_file.read(1)
+				memIndex = 0x200 #512
+
+				while byte:
+					self.memory[memIndex] = byte[0]
+					memIndex += 1
+					byte = rom_file.read(1)
+
+	def save_state(self, filename):
+		rom_name = slice(filename.rfind('/'), len(filename), 1)
+		with open("savestates/" + filename[rom_name] + ".pickle", "wb") as f:
+			pickle.dump([self.opcode, self.memory, self.registers, self.delay_timer, self.sound_timer, self.index, self.pc, self.sp, self.stack, self.display, self.screen_update, self.blocked, self.paused], f)
+
+	def load_state(self, filename):
+		rom_name = slice(filename.rfind('/'), len(filename), 1)
+		try:
+			with open("savestates" + filename[rom_name] + ".pickle", "rb") as f:
+				self.opcode, self.memory, self.registers, self.delay_timer, self.sound_timer, self.index, self.pc, self.sp, self.stack, self.display, self.screen_update, self.blocked, self.paused = pickle.load(f)
+		except:
+			print("Save file does not exist!")
